@@ -34,6 +34,7 @@ class Config:
 
     # norm_pos + one_hot_pos + end_pos_features + treasure_poss_features + [buff_availability, talent_availability]
     #  + obstacle_map + treasure_map + end_map + location_memory
+    # RelativeDirection通过枚举离散化表示方向信息(sz=9)
     # 2 + 128*2 + 9  + 9*15 + 2 + 4*51*51 = 10808
     # 描述如何进行特征分割，示例代码中的特征处理成向量+特征图，以下配置描述了两者的维度
     DESC_OBS_SPLIT = [404, (4, 51, 51)]  # sum = 10808

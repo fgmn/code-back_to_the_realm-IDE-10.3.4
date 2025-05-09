@@ -77,12 +77,15 @@ class Agent(BaseAgent):
                 dtype=torch.float32,
             )
 
+    # take_action
     def __predict_detail(self, list_obs_data, exploit_flag=False):
         batch = len(list_obs_data)
+        #将一维二维特征分开
         feature_vec = [obs_data.feature[: self.obs_split[0]] for obs_data in list_obs_data]
         feature_map = [obs_data.feature[self.obs_split[0] :] for obs_data in list_obs_data]
         legal_act = [obs_data.legal_act for obs_data in list_obs_data]
         legal_act = torch.tensor(np.array(legal_act))
+        #8个方向移动+8个方向闪现的action mask
         legal_act = (
             torch.cat(
                 (
@@ -136,6 +139,8 @@ class Agent(BaseAgent):
         batch = len(t_data)
 
         # [b, d]
+        # obs为t时刻的观测
+        # _obs为t+1时刻的观测
         batch_feature_vec = [frame.obs[: self.obs_split[0]] for frame in t_data]
         batch_feature_map = [frame.obs[self.obs_split[0] :] for frame in t_data]
         batch_action = torch.LongTensor(np.array([int(frame.act) for frame in t_data])).view(-1, 1).to(self.device)
@@ -169,6 +174,7 @@ class Agent(BaseAgent):
 
         model = getattr(self, "target_model")
         model.eval()
+        #todo Double Q-learning
         with torch.no_grad():
             q, h = model(_batch_feature, state=None)
             q = q.masked_fill(~_batch_obs_legal, float(torch.min(q)))
@@ -181,7 +187,9 @@ class Agent(BaseAgent):
         model = getattr(self, "model")
         model.train()
         logits, h = model(batch_feature, state=None)
-
+        # logits: [batch_size, num_actions]
+        # logits.gather(1, batch_action): [batch_size, 1]
+        # logits.gather(1, batch_action).view(-1): [batch_size]
         loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
         loss.backward()
         self.optim.step()
