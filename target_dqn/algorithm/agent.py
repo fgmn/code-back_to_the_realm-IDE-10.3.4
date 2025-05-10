@@ -86,17 +86,18 @@ class Agent(BaseAgent):
         legal_act = [obs_data.legal_act for obs_data in list_obs_data]
         legal_act = torch.tensor(np.array(legal_act))
         #8个方向移动+8个方向闪现的action mask
-        legal_act = (
-            torch.cat(
-                (
-                    legal_act[:, 0].unsqueeze(1).expand(batch, self.direction_space),
-                    legal_act[:, 1].unsqueeze(1).expand(batch, self.talent_direction),
-                ),
-                1,
-            )
-            .bool()
-            .to(self.device)
-        )
+        # legal_act = (
+        #     torch.cat(
+        #         (
+        #             legal_act[:, 0].unsqueeze(1).expand(batch, self.direction_space),
+        #             legal_act[:, 1].unsqueeze(1).expand(batch, self.talent_direction),
+        #         ),
+        #         1,
+        #     )
+        #     .bool()
+        #     .to(self.device)
+        # )
+        legal_act = legal_act.bool().to(self.device)
         model = self.model
         model.eval()
         # Exploration factor,
@@ -146,17 +147,18 @@ class Agent(BaseAgent):
         batch_action = torch.LongTensor(np.array([int(frame.act) for frame in t_data])).view(-1, 1).to(self.device)
 
         _batch_obs_legal = torch.tensor(np.array([frame._obs_legal for frame in t_data]))
-        _batch_obs_legal = (
-            torch.cat(
-                (
-                    _batch_obs_legal[:, 0].unsqueeze(1).expand(batch, self.direction_space),
-                    _batch_obs_legal[:, 1].unsqueeze(1).expand(batch, self.talent_direction),
-                ),
-                1,
-            )
-            .bool()
-            .to(self.device)
-        )
+        # _batch_obs_legal = (
+        #     torch.cat(
+        #         (
+        #             _batch_obs_legal[:, 0].unsqueeze(1).expand(batch, self.direction_space),
+        #             _batch_obs_legal[:, 1].unsqueeze(1).expand(batch, self.talent_direction),
+        #         ),
+        #         1,
+        #     )
+        #     .bool()
+        #     .to(self.device)
+        # )
+        _batch_obs_legal = _batch_obs_legal.bool().to(self.device)
 
         rew = torch.tensor(np.array([frame.rew for frame in t_data]), device=self.device)
         _batch_feature_vec = [frame._obs[: self.obs_split[0]] for frame in t_data]

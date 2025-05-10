@@ -29,7 +29,7 @@ from typing import List
 # Simply modify the value of the algorithm_name variable.
 # 运行train_test前必须修改这里的算法名字, 必须是dqn、target_dqn、diy里的一个, 修改algorithm_name的值即可
 algorithm_name_list = ["dqn", "target_dqn", "diy"]
-algorithm_name = "dqn"
+algorithm_name = "target_dqn"
 
 
 # train

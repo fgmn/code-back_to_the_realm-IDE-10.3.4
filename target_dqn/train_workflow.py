@@ -38,7 +38,7 @@ def workflow(envs, agents, logger=None, monitor=None):
             # "treasure_id": [4, 5, 6, 7, 8, 9],
             "treasure_random": 1,
             "talent_type": 1,
-            "treasure_num": 8,
+            "treasure_num": 13,
             "max_step": 2000,
         }
     }

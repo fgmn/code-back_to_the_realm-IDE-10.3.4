@@ -8,11 +8,12 @@ learner_train_by_while_true = true
 learner_train_sleep_seconds = 0.0001
 
 # 下面是replay buffer的相关配置
-replay_buffer_capacity = 4096
+replay_buffer_capacity = 40960
 preload_ratio = 1
 
 # learner上reverb样本的输入维度, 注意不同的算法维度不一样, 比如dqn的维度是21624, target_dqn的维度是21624
-sample_dim = 21624
+#sample_dim = 21624
+sample_dim = 21652
 
 # torch使用时默认的线程数目, 针对单机限制CPU使用很重要
 torch_num_threads = 1

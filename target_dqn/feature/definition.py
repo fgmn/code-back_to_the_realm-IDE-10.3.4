@@ -61,6 +61,10 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     buff_dist = _obs.feature.buff_pos.grid_distance
     treasure_dists = [pos.grid_distance for pos in _obs.feature.treasure_pos]
 
+    # print(f"treasure_dists: {treasure_dists}")
+    # treasure_dists: [1.0, 1.0, 0.49609375, 0.69921875, 0.44921875, 0.34765625, 0.52734375, 
+    # 0.71484375, 0.41796875, 0.20703125, 0.59765625, 0.35546875, 0.61328125, 0.23828125, 0.12109375]
+
     # Get the agent's position from the previous frame
     # 获取智能体上一帧的位置
     prev_pos = env_info.frame_state.heroes[0].pos
@@ -100,6 +104,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # Boundary handling: At the first frame, prev_end_dist is initialized to 1,
     # and no reward is calculated at this time
     # 边界处理: 第一帧时prev_end_dist初始化为1，此时不计算奖励
+    #所有宝箱收集完之后才给到终点的奖励
     if prev_end_dist != 1 and not is_treasures_remain:
         reward_end_dist += 20 if end_dist < prev_end_dist else -20
 
@@ -107,7 +112,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # 奖励1.2 获胜的奖励
     reward_win = 0
     if terminated and not is_treasures_remain:
-        reward_win += 200
+        reward_win += 100
 
     """
     Reward 2. Rewards related to the treasure chest
@@ -116,16 +121,24 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     reward_treasure_dist = 0
     # Reward 2.1 Reward for getting closer to the treasure chest (only consider the nearest one)
     # 奖励2.1 向宝箱靠近的奖励(只考虑最近的那个宝箱)
+    # if treasure_dists.count(1.0) < 15:
+    #     prev_min_dist, min_dist = min(prev_treasure_dists), min(treasure_dists)
+    #     #保证是同一宝箱
+    #     if prev_treasure_dists.index(prev_min_dist) == treasure_dists.index(min_dist):
+    #         reward_treasure_dist += 20 if min_dist < prev_min_dist else -20
+
+    #13个宝箱的最优拾取顺序为15,10,14,12,5,9,6,7,3,11,4,8,13
+    pick_seq = [15, 10, 14, 12, 5, 9, 6, 7, 3, 11, 4, 8, 13]
     if treasure_dists.count(1.0) < 15:
-        prev_min_dist, min_dist = min(prev_treasure_dists), min(treasure_dists)
-        if prev_treasure_dists.index(prev_min_dist) == treasure_dists.index(min_dist):
-            reward_treasure_dist += 20 if min_dist < prev_min_dist else -20
+        pick_num = pick_seq[treasure_dists.count(1.0)-2]-1
+        cur_dist, prev_dist = treasure_dists[pick_num], prev_treasure_dists[pick_num]
+        reward_treasure_dist += 20 if cur_dist < prev_dist else -20
 
     # Reward 2.2 Reward for getting the treasure chest
     # 奖励2.2 获得宝箱的奖励
     reward_treasure = 0
     if prev_treasure_dists.count(1.0) < treasure_dists.count(1.0):
-        reward_treasure = 200
+        reward_treasure = 60
 
     """
     Reward 3. Rewards related to the buff
@@ -161,7 +174,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     Reward 5. Rewards for quick clearance
     奖励5. 关于快速通关的奖励
     """
-    reward_step = 1
+    reward_step = 0.001
     # Reward 5.1 Penalty for not getting close to the end point after collecting all the treasure chests
     # (TODO: Give penalty after collecting all the treasure chests, encourage full collection)
     # 奖励5.1 收集完所有宝箱却未靠近终点的惩罚
@@ -184,23 +197,24 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
         # Give a relatively large penalty for bumping into the wall,
         # so that the agent can learn not to bump into the wall as soon as possible
         # 对撞墙给予一个比较大的惩罚，以便agent能够尽快学会不撞墙
-        reward_bump = 200
+        reward_bump = 10
 
     """
     Concatenation of rewards: Here are 10 rewards provided, students can concatenate as needed,
     and can also add new rewards themselves
     奖励的拼接: 这里提供了10个奖励, 同学们按需自行拼接, 也可以自行添加新的奖励
     """
+    # 系数固定为+1/-1/0
     REWARD_CONFIG = {
         "reward_end_dist": "1.0",
-        "reward_win": "0.5",
+        "reward_win": "1.0",
         "reward_buff_dist": "0",
         "reward_buff": "0",
         "reward_treasure_dists": "1",
-        "reward_treasure": "0.3",
+        "reward_treasure": "1.0",
         "reward_flicker": "0",
-        "reward_step": "-0.001",
-        "reward_bump": "-0.05",
+        "reward_step": "-1.0",
+        "reward_bump": "-1.0",
         "reward_memory": "-1.0",
     }
 
@@ -299,9 +313,15 @@ def observation_process(raw_obs, env_info=None):
     # Feature processing 7: Next treasure chest to find
     # 特征处理7：下一个需要寻找的宝箱
     treasure_dists = [pos.grid_distance for pos in treasure_poss]
+    # if treasure_dists.count(1.0) < 15:
+    #     end_treasures_id = np.argmin(treasure_dists)
+    #     end_pos_features = read_relative_position(treasure_poss[end_treasures_id])
+    
+    pick_seq = [15, 10, 14, 12, 5, 9, 6, 7, 3, 11, 4, 8, 13]
     if treasure_dists.count(1.0) < 15:
-        end_treasures_id = np.argmin(treasure_dists)
-        end_pos_features = read_relative_position(treasure_poss[end_treasures_id])
+        pick_num = pick_seq[treasure_dists.count(1.0)-2]-1
+        end_pos_features = read_relative_position(treasure_poss[pick_num])
+
 
     # Feature concatenation:
     # Concatenate all necessary features as vector features (2 + 128*2 + 9  + 9*15 + 2 + 4*51*51 = 10808)
@@ -313,6 +333,34 @@ def observation_process(raw_obs, env_info=None):
     # Legal actions
     # 合法动作
     legal_act = list(raw_obs.legal_act)
+    # print(f"legal_act: {legal_act}")
+    #legal_act: [1, 0]
+    obstacle_map = np.array(obstacle_map, dtype=np.int32)
+    grid = obstacle_map.reshape(51, 51)
+    rows = [26, 25, 24]
+    cols = [24, 25, 26]
+    sub = grid[np.ix_(rows, cols)]  # shape = (3,3)
+
+    # 用二维 array 直接定义每个相对位置对应的动作索引，
+    # 中心位置我们用 -1 占位，后面再自动忽略它
+    action_idx = np.array([
+        [3, 2, 1],
+        [4, -1, 0],
+        [5, 6, 7],
+    ])
+
+    mask_positions = (sub == 0) & (action_idx != -1)
+
+    # 初始化一个全 1 的动作 mask，然后对这些位置对应的动作打洞（置 0）
+    obstacle_mask = np.ones(8, dtype=np.int32)
+    obstacle_mask[action_idx[mask_positions]] = 0
+    #先不考虑闪现
+    flicker_mask = np.repeat(legal_act, 8)
+    obstacle_mask = np.tile(obstacle_mask, 2)
+
+    legal_act = flicker_mask & obstacle_mask
+    # print(f"legal_act: {legal_act}")
+
 
     return ObsData(feature=feature_vec + feature_map, legal_act=legal_act)
 
@@ -353,8 +401,10 @@ def NumpyData2SampleData(s_data):
         # 维度参考config.py 中的 DESC_OBS_SPLIT配置
         obs=s_data[:10808],
         _obs=s_data[10808:21616],
-        obs_legal=s_data[-8:-6],
-        _obs_legal=s_data[-6:-4],
+        # obs_legal=s_data[-8:-6],
+        # _obs_legal=s_data[-6:-4],
+        obs_legal=s_data[-36:-20],
+        _obs_legal=s_data[-20:-4],
         act=s_data[-4],
         rew=s_data[-3],
         ret=s_data[-2],

@@ -4,6 +4,6 @@ back_to_the_realm:
   policies:
     train_one:
       policy_builder: kaiwudrl.server.aisrv.async_policy.AsyncBuilder
-      algo: dqn
+      algo: target_dqn
       state: conf.back_to_the_realm_state.BackToTheRealmState
       action: conf.back_to_the_realm_action.BackToTheRealmAction
