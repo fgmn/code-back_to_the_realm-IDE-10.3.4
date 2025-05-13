@@ -65,7 +65,7 @@ class Agent(BaseAgent):
 
     def linear_schedule(self, step):
         # 学习率线性衰减
-        self.lr = max(1e-5, self.lr - step / 3e8)
+        self.lr = max(1e-5, self.lr - step / 1e10)
         for param_group in self.optim.param_groups:
             param_group["lr"] = self.lr
 
@@ -226,7 +226,7 @@ class Agent(BaseAgent):
                 "q_value": q_value,
                 "reward": reward,
                 "diy_1": model_grad_norm,
-                "diy_2": 0,
+                "diy_2": self.lr,
                 "diy_3": 0,
                 "diy_4": 0,
                 "diy_5": 0,

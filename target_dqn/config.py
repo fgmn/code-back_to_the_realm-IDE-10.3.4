@@ -50,7 +50,7 @@ class Config:
 
     # Discount factor GAMMA in RL
     # RL中的回报折扣GAMMA
-    GAMMA = 0.9
+    GAMMA = 0.95
 
     # epsilon
     EPSILON = 0.1
