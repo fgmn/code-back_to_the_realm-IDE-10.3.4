@@ -106,13 +106,13 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # 边界处理: 第一帧时prev_end_dist初始化为1，此时不计算奖励
     #所有宝箱收集完之后才给到终点的奖励
     if prev_end_dist != 1 and not is_treasures_remain:
-        reward_end_dist += 20 if end_dist < prev_end_dist else -20
+        reward_end_dist += 0.2 if end_dist < prev_end_dist else -0.2
 
     # Reward 1.2 Reward for winning
     # 奖励1.2 获胜的奖励
     reward_win = 0
     if terminated and not is_treasures_remain:
-        reward_win += 100
+        reward_win += 0.2
 
     """
     Reward 2. Rewards related to the treasure chest
@@ -132,13 +132,13 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     if treasure_dists.count(1.0) < 15:
         pick_num = pick_seq[treasure_dists.count(1.0)-2]-1
         cur_dist, prev_dist = treasure_dists[pick_num], prev_treasure_dists[pick_num]
-        reward_treasure_dist += 20 if cur_dist < prev_dist else -20
+        reward_treasure_dist += 0.2 if cur_dist < prev_dist else -0.2
 
     # Reward 2.2 Reward for getting the treasure chest
     # 奖励2.2 获得宝箱的奖励
     reward_treasure = 0
     if prev_treasure_dists.count(1.0) < treasure_dists.count(1.0):
-        reward_treasure = 60
+        reward_treasure = 0.3
 
     """
     Reward 3. Rewards related to the buff
@@ -148,25 +148,35 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # 奖励3.1 靠近buff的奖励
     reward_buff_dist = 0
     if prev_buff_dist != 1 and buff_dist != 1 and buff_availability:
-        reward_buff_dist = int(256 * (prev_buff_dist - buff_dist))
+        # reward_buff_dist = int(256 * (prev_buff_dist - buff_dist))
+        reward_buff_dist += 0.05 if buff_dist < prev_buff_dist else -0.05
 
     # Reward 3.2 Reward for getting the buff
     # 奖励3.2 获得buff的奖励
     reward_buff = 0
     if speed_up and not prev_speed_up:
-        reward_buff += 50
+        reward_buff += 0.1
 
     """
     Reward 4. Rewards related to the flicker
     奖励4. 与闪现相关的奖励
     """
     reward_flicker = 0
+    legal_act = obs.legal_act
+    _legal_act = _obs.legal_act
+    # 鼓励一开始就用掉闪现
+    if legal_act[1] == 0:
+        reward_flicker = -0.05
+    if legal_act[1] == 1 and _legal_act[1] == 0:
+        flicker_dist = (curr_pos_x-prev_pos_x)**2 + (curr_pos_z-prev_pos_z)**2
     # Reward 4.1 Penalty for flickering into the wall (TODO)
     # 奖励4.1 撞墙闪现的惩罚 (TODO)
-
+        if flicker_dist < 7500:
+            reward_flicker = -0.2
     # Reward 4.2 Reward for normal flickering (TODO)
     # 奖励4.2 正常闪现的奖励 (TODO)
-
+        else:
+            reward_flicker = 0.2
     # Reward 4.3 Reward for super flickering (TODO)
     # 奖励4.3 超级闪现的奖励 (TODO)
 
@@ -174,7 +184,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     Reward 5. Rewards for quick clearance
     奖励5. 关于快速通关的奖励
     """
-    reward_step = 0.001
+    reward_step = 0.01
     # Reward 5.1 Penalty for not getting close to the end point after collecting all the treasure chests
     # (TODO: Give penalty after collecting all the treasure chests, encourage full collection)
     # 奖励5.1 收集完所有宝箱却未靠近终点的惩罚
@@ -197,7 +207,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
         # Give a relatively large penalty for bumping into the wall,
         # so that the agent can learn not to bump into the wall as soon as possible
         # 对撞墙给予一个比较大的惩罚，以便agent能够尽快学会不撞墙
-        reward_bump = 10
+        reward_bump = 1
 
     """
     Concatenation of rewards: Here are 10 rewards provided, students can concatenate as needed,
@@ -208,14 +218,14 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     REWARD_CONFIG = {
         "reward_end_dist": "1.0",
         "reward_win": "1.0",
-        "reward_buff_dist": "0",
-        "reward_buff": "0",
-        "reward_treasure_dists": "1",
+        "reward_buff_dist": "1.0",
+        "reward_buff": "1.0",
+        "reward_treasure_dists": "1.0",
         "reward_treasure": "1.0",
-        "reward_flicker": "0",
+        "reward_flicker": "1.0",
         "reward_step": "-1.0",
         "reward_bump": "-1.0",
-        "reward_memory": "-1.0",
+        "reward_memory": "-0.005",
     }
 
     reward = [

@@ -33,12 +33,12 @@ class Model(nn.Module):
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
-        ]
+        ]#压缩长宽的同时增加通道数
         cnn_layer4 = [
             nn.Conv2d(64, 8, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(8),
             nn.ReLU(inplace=True),
-        ]
+        ]#直接压缩通道维
         cnn_flatten = [nn.Flatten(), nn.Linear(512, 128), nn.ReLU(inplace=True)]
 
         self.cnn_layer = cnn_layer1 + cnn_layer2 + cnn_layer3 + cnn_layer4 + cnn_flatten

@@ -8,7 +8,7 @@ learner_train_by_while_true = true
 learner_train_sleep_seconds = 0.0001
 
 # 下面是replay buffer的相关配置
-replay_buffer_capacity = 40960
+replay_buffer_capacity = 4096
 preload_ratio = 1
 
 # learner上reverb样本的输入维度, 注意不同的算法维度不一样, 比如dqn的维度是21624, target_dqn的维度是21624
@@ -25,7 +25,7 @@ predict_batch_size = 1
 send_sample_size = 320
 
 # learner训练批处理大小限制
-train_batch_size = 256
+train_batch_size = 512
 # 样本消耗/生成采样比
 production_consume_ratio = 10
 

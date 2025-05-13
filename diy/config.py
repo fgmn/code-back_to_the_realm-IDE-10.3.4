@@ -59,6 +59,11 @@ class Config:
     # 初始的学习率
     START_LR = 1e-3
 
+    #rainbow
+    N_ATOMS = 51
+    V_MIN = -10
+    V_MAX = 10
+
     # Configuration about kaiwu usage. The following configurations can be ignored
     # 关于开悟平台使用的配置，是可以忽略的配置，不需要改动
     SUB_ACTION_MASK_SHAPE = 0

@@ -20,22 +20,28 @@ class Model(nn.Module):
     def __init__(self, state_shape, action_shape=0, softmax=False):
         super().__init__()
         cnn_layer1 = [
-            nn.Conv2d(4, 16, kernel_size=3, stride=1, padding=2),
+            nn.Conv2d(4, 16, kernel_size=3, stride=2, padding=2),
             nn.BatchNorm2d(16),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         ]
         cnn_layer2 = [
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=2),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=2),
             nn.BatchNorm2d(32),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
         ]
         cnn_layer3 = [
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(),
-        ]
-        max_pool = [nn.MaxPool2d(kernel_size=(2, 2))]
-        self.cnn_layer = cnn_layer1 + max_pool + cnn_layer2 + max_pool + cnn_layer3 + max_pool
+            nn.ReLU(inplace=True),
+        ]#压缩长宽的同时增加通道数
+        cnn_layer4 = [
+            nn.Conv2d(64, 8, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+        ]#直接压缩通道维
+        cnn_flatten = [nn.Flatten(), nn.Linear(512, 128), nn.ReLU(inplace=True)]
+
+        self.cnn_layer = cnn_layer1 + cnn_layer2 + cnn_layer3 + cnn_layer4 + cnn_flatten
         self.cnn_model = nn.Sequential(*self.cnn_layer)
 
         fc_layer1 = [nn.Linear(np.prod(state_shape), 256), nn.ReLU(inplace=True)]

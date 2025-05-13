@@ -12,7 +12,7 @@
 import time
 from kaiwu_agent.utils.common_func import Frame
 from kaiwu_agent.utils.common_func import attached
-from target_dqn.feature.definition import (
+from diy.feature.definition import (
     observation_process,
     action_process,
     sample_process,
@@ -150,18 +150,24 @@ def run_episodes(n_episode, env, agent, g_data_truncat, usr_conf, logger):
                 # 撞墙行为统计
                 bump_cnt += is_bump
 
+            if truncated or terminated:
+                logger.info(
+                    f"Episode: {episode}, Step: {step}, Bump Count: {bump_cnt}, \
+                        Frame No: {frame_no}, Score: {score}, Reward: {reward}, \
+                        Terminated: {terminated}, Truncated: {truncated}"
+                )
             # Determine game over, and update the number of victories
             # 判断游戏结束, 并更新胜利次数
-            if truncated:
-                logger.info(
-                    f"truncated is True, so this episode {episode} timeout, \
-                        collected treasures: {treasures_num  - 7}"
-                )
-            elif terminated:
-                logger.info(
-                    f"terminated is True, so this episode {episode} reach the end, \
-                        collected treasures: {treasures_num  - 7}"
-                )
+            # if truncated:
+            #     logger.info(
+            #         f"truncated is True, so this episode {episode} timeout, \
+            #             collected treasures: {treasures_num  - 7}"
+            #     )
+            # elif terminated:
+            #     logger.info(
+            #         f"terminated is True, so this episode {episode} reach the end, \
+            #             collected treasures: {treasures_num  - 7}"
+            #     )
             done = terminated or truncated
 
             # Construct game frames to prepare for sample construction
