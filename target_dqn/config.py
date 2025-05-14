@@ -58,6 +58,8 @@ class Config:
     # Initial learning rate
     # 初始的学习率
     START_LR = 1e-4
+    # 学习率衰减
+    LR_DECAY = 2e-9
 
     # Configuration about kaiwu usage. The following configurations can be ignored
     # 关于开悟平台使用的配置，是可以忽略的配置，不需要改动

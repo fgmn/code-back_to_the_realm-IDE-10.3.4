@@ -45,7 +45,8 @@ class Agent(BaseAgent):
         self.obs_split = Config.DESC_OBS_SPLIT
         self._gamma = Config.GAMMA
         self.lr = Config.START_LR
-
+        self.decay_rate = Config.LR_DECAY
+        
         self.device = device
         self.model = Model(
             state_shape=self.obs_shape,
@@ -65,10 +66,10 @@ class Agent(BaseAgent):
 
     def linear_schedule(self, step):
         # 学习率线性衰减
-        self.lr = max(1e-5, self.lr - step / 1e10)
+        self.lr = max(1e-5, self.lr - self.decay_rate)#6e4*decay_rate=1e-4
         for param_group in self.optim.param_groups:
             param_group["lr"] = self.lr
-
+        print(f"step: {step}, lr: {self.lr}")
 
     def __convert_to_tensor(self, data):
         if isinstance(data, list):
@@ -111,8 +112,6 @@ class Agent(BaseAgent):
         # we want epsilon to decrease as the number of prediction steps increases, until it reaches 0.1
         # 探索因子, 我们希望epsilon随着预测步数越来越小，直到0.1为止
         self.epsilon = max(0.1, self.epsilon - self.predict_count / self.egp)
-        # 线性衰减学习率
-        self.linear_schedule(self.predict_count)
 
         with torch.no_grad():
             # epsilon greedy
@@ -144,7 +143,8 @@ class Agent(BaseAgent):
 
     @learn_wrapper
     def learn(self, list_sample_data):
-
+        # 线性衰减学习率
+        self.linear_schedule(self.train_step)
         t_data = list_sample_data
         batch = len(t_data)
 

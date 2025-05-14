@@ -23,7 +23,7 @@ class Config:
 
     # Size of observation
     # observation的维度，注意在我们的示例代码中原特征维度是10808，这里是经过CNN处理之后的维度与原始向量特征拼接后的维度
-    DIM_OF_OBSERVATION = 4096 + 404
+    DIM_OF_OBSERVATION = 128 + 404
 
     # Dimension of movement action direction
     # 移动动作方向的维度
@@ -46,23 +46,20 @@ class Config:
 
     # Exploration factor, see the calculation of epsilon in the function in the above comment
     # 探索因子, epsilon的计算见上面注释中的函数
-    EPSILON_GREEDY_PROBABILITY = 300000
+    EPSILON_GREEDY_PROBABILITY = 30000
 
     # Discount factor GAMMA in RL
     # RL中的回报折扣GAMMA
-    GAMMA = 0.9
+    GAMMA = 0.95
 
     # epsilon
     EPSILON = 0.1
 
     # Initial learning rate
     # 初始的学习率
-    START_LR = 1e-3
-
-    #rainbow
-    N_ATOMS = 51
-    V_MIN = -10
-    V_MAX = 10
+    START_LR = 1e-4
+    # 学习率衰减
+    LR_DECAY = 2e-9
 
     # Configuration about kaiwu usage. The following configurations can be ignored
     # 关于开悟平台使用的配置，是可以忽略的配置，不需要改动

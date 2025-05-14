@@ -39,7 +39,7 @@ def workflow(envs, agents, logger=None, monitor=None):
             "treasure_random": 1,
             "talent_type": 1,
             "treasure_num": 13,
-            "max_step": 2000,
+            "max_step": 1000,
         }
     }
 
@@ -156,8 +156,9 @@ def run_episodes(n_episode, env, agent, g_data_truncat, usr_conf, logger):
                         Frame No: {frame_no}, Score: {score}, Reward: {reward}, \
                         Terminated: {terminated}, Truncated: {truncated}"
                 )
-            # Determine game over, and update the number of victories
-            # 判断游戏结束, 并更新胜利次数
+
+            # # Determine game over, and update the number of victories
+            # # 判断游戏结束, 并更新胜利次数
             # if truncated:
             #     logger.info(
             #         f"truncated is True, so this episode {episode} timeout, \

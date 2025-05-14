@@ -112,7 +112,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # 奖励1.2 获胜的奖励
     reward_win = 0
     if terminated and not is_treasures_remain:
-        reward_win += 0.2
+        reward_win += 10
 
     """
     Reward 2. Rewards related to the treasure chest
@@ -138,7 +138,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # 奖励2.2 获得宝箱的奖励
     reward_treasure = 0
     if prev_treasure_dists.count(1.0) < treasure_dists.count(1.0):
-        reward_treasure = 0.3
+        reward_treasure = 5
 
     """
     Reward 3. Rewards related to the buff
@@ -155,7 +155,7 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     # 奖励3.2 获得buff的奖励
     reward_buff = 0
     if speed_up and not prev_speed_up:
-        reward_buff += 0.1
+        reward_buff += 1
 
     """
     Reward 4. Rewards related to the flicker
@@ -166,17 +166,17 @@ def reward_shaping(frame_no, score, terminated, truncated, obs, _obs, env_info, 
     _legal_act = _obs.legal_act
     # 鼓励一开始就用掉闪现
     if legal_act[1] == 0:
-        reward_flicker = -0.05
+        reward_flicker = -0.1
     if legal_act[1] == 1 and _legal_act[1] == 0:
         flicker_dist = (curr_pos_x-prev_pos_x)**2 + (curr_pos_z-prev_pos_z)**2
     # Reward 4.1 Penalty for flickering into the wall (TODO)
     # 奖励4.1 撞墙闪现的惩罚 (TODO)
         if flicker_dist < 7500:
-            reward_flicker = -0.2
+            reward_flicker = -2
     # Reward 4.2 Reward for normal flickering (TODO)
     # 奖励4.2 正常闪现的奖励 (TODO)
         else:
-            reward_flicker = 0.2
+            reward_flicker = 2
     # Reward 4.3 Reward for super flickering (TODO)
     # 奖励4.3 超级闪现的奖励 (TODO)
 

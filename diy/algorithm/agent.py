@@ -45,18 +45,11 @@ class Agent(BaseAgent):
         self.obs_split = Config.DESC_OBS_SPLIT
         self._gamma = Config.GAMMA
         self.lr = Config.START_LR
-
+        self.decay_rate = Config.LR_DECAY
+        
         self.device = device
-        # self.model = Model(
-        #     state_shape=self.obs_shape,
-        #     action_shape=self.act_shape,
-        #     softmax=False,
-        # )
-        self.model = NoisyDuelingDistributionalNetwork(
+        self.model = Model(
             state_shape=self.obs_shape,
-            n_atoms=Config.N_ATOMS,
-            v_min=Config.V_MIN,
-            v_max=Config.V_MAX,
             action_shape=self.act_shape,
             softmax=False,
         )
@@ -70,6 +63,13 @@ class Agent(BaseAgent):
         self.agent_type = agent_type
         self.logger = logger
         self.monitor = monitor
+
+    def linear_schedule(self, step):
+        # 学习率线性衰减
+        self.lr = max(1e-5, self.lr - self.decay_rate)#6e4*decay_rate=1e-4
+        for param_group in self.optim.param_groups:
+            param_group["lr"] = self.lr
+        # print(f"step: {step}, lr: {self.lr}")
 
     def __convert_to_tensor(self, data):
         if isinstance(data, list):
@@ -94,14 +94,20 @@ class Agent(BaseAgent):
         legal_act = [obs_data.legal_act for obs_data in list_obs_data]
         legal_act = torch.tensor(np.array(legal_act))
         #8个方向移动+8个方向闪现的action mask
+        # legal_act = (
+        #     torch.cat(
+        #         (
+        #             legal_act[:, 0].unsqueeze(1).expand(batch, self.direction_space),
+        #             legal_act[:, 1].unsqueeze(1).expand(batch, self.talent_direction),
+        #         ),
+        #         1,
+        #     )
+        #     .bool()
+        #     .to(self.device)
+        # )
         legal_act = legal_act.bool().to(self.device)
         model = self.model
-        if exploit_flag:
-            model.train()
-            model.reset_noise()
-        else:
-            model.eval()
-        
+        model.eval()
         # Exploration factor,
         # we want epsilon to decrease as the number of prediction steps increases, until it reaches 0.1
         # 探索因子, 我们希望epsilon随着预测步数越来越小，直到0.1为止
@@ -115,15 +121,13 @@ class Agent(BaseAgent):
                 random_action = random_action.masked_fill(~legal_act, 0)
                 act = random_action.argmax(dim=1).cpu().view(-1, 1).tolist()
             else:
-                # 使用Noisy Network自带探索
                 feature = [
                     self.__convert_to_tensor(feature_vec),
                     self.__convert_to_tensor(feature_map).view(batch, *self.obs_split[1]),
                 ]
-                q_dist, _ = model(feature, state=None)
-                q_values = (q_dist * model.support).sum(dim=2)
-                q_values = q_values.masked_fill(~legal_act, float(torch.min(q_values)))
-                act = q_values.argmax(dim=1).cpu().view(-1, 1).tolist()
+                logits, _ = model(feature, state=None)
+                logits = logits.masked_fill(~legal_act, float(torch.min(logits)))
+                act = logits.argmax(dim=1).cpu().view(-1, 1).tolist()
 
         format_action = [[instance[0] % self.direction_space, instance[0] // self.direction_space] for instance in act]
         self.predict_count += 1
@@ -139,7 +143,8 @@ class Agent(BaseAgent):
 
     @learn_wrapper
     def learn(self, list_sample_data):
-
+        # 线性衰减学习率
+        self.linear_schedule(self.train_step)
         t_data = list_sample_data
         batch = len(t_data)
 
@@ -151,6 +156,17 @@ class Agent(BaseAgent):
         batch_action = torch.LongTensor(np.array([int(frame.act) for frame in t_data])).view(-1, 1).to(self.device)
 
         _batch_obs_legal = torch.tensor(np.array([frame._obs_legal for frame in t_data]))
+        # _batch_obs_legal = (
+        #     torch.cat(
+        #         (
+        #             _batch_obs_legal[:, 0].unsqueeze(1).expand(batch, self.direction_space),
+        #             _batch_obs_legal[:, 1].unsqueeze(1).expand(batch, self.talent_direction),
+        #         ),
+        #         1,
+        #     )
+        #     .bool()
+        #     .to(self.device)
+        # )
         _batch_obs_legal = _batch_obs_legal.bool().to(self.device)
 
         rew = torch.tensor(np.array([frame.rew for frame in t_data]), device=self.device)
@@ -167,62 +183,27 @@ class Agent(BaseAgent):
             self.__convert_to_tensor(_batch_feature_map).view(batch, *self.obs_split[1]),
         ]
 
-        model = getattr(self, "model")
-        target_model = getattr(self, "target_model")
-
-        # 重新采样噪声
-        model.reset_noise()
-        target_model.reset_noise()
-
+        model = getattr(self, "target_model")
         model.eval()
-        target_model.eval()
+        #todo Double Q-learning
         with torch.no_grad():
-            next_dist, _ = target_model(_batch_feature, state=None)
-            support = target_model.support  # [n_atoms]
-            # next_q_values = torch.sum(next_dist * support, dim=2)
-            # next_q_values = next_q_values.masked_fill(~_batch_obs_legal, float(torch.min(next_q_values)))
+            q, h = model(_batch_feature, state=None)
+            q = q.masked_fill(~_batch_obs_legal, float(torch.min(q)))
+            q_max = q.max(dim=1).values.detach()
 
-            # double q-learning
-            next_dist_online, _ = model(_batch_feature, state=None)  # [B, num_actions, n_atoms]
-            next_q_online = torch.sum(next_dist_online * support, dim=2)  # [B, num_actions]
-            next_q_online = next_q_online.masked_fill(~_batch_obs_legal, float(torch.min(next_q_online)))
-            best_actions = torch.argmax(next_q_online, dim=1)  # [B]
-            # pmfs=Probability Mass Functions概率质量函数
-            next_pmfs = next_dist[torch.arange(batch), best_actions]    # [B, n_atoms]
-
-            # 由于无法修改采样器的实现，这里只能采用1-step TD
-            next_atoms = rew.view(-1, 1) + self._gamma * support * not_done.view(-1, 1)     # [B, n_atoms]
-            tz = next_atoms.clamp(model.v_min, model.v_max)
-
-            # projection
-            delta_z = model.delta_z
-            b = (tz - model.v_min) / delta_z  # shape: [B, n_atoms]
-            l = b.floor().clamp(0, Config.N_ATOMS - 1)
-            u = b.ceil().clamp(0, Config.N_ATOMS - 1)
-
-            # (l == u).float() handles the case where bj is exactly an integer
-            # example bj = 1, then the upper ceiling should be uj= 2, and lj= 1
-            d_m_l = (u.float() + (l == b).float() - b) * next_pmfs  # [B, n_atoms]
-            d_m_u = (b - l) * next_pmfs  # [B, n_atoms]
-
-            target_pmfs = torch.zeros_like(next_pmfs)
-            for i in range(target_pmfs.size(0)):
-                target_pmfs[i].index_add_(0, l[i].long(), d_m_l[i])
-                target_pmfs[i].index_add_(0, u[i].long(), d_m_u[i])
-
-        
-        model.train()
-        dist, _ = model(batch_feature, state=None)  # [B, num_actions, n_atoms]
-        pred_dist = dist.gather(1, batch_action.unsqueeze(-1).expand(-1, -1, Config.N_ATOMS)).squeeze(1)
-        log_pred = torch.log(pred_dist.clamp(min=1e-5, max=1 - 1e-5))
-
-        loss_per_sample = -(target_pmfs * log_pred).sum(dim=1)
-        # loss = (loss_per_sample * data.weights.squeeze()).mean()
-        # 没有优先经验回放，直接取算数平均
-        loss = loss_per_sample.mean()
+        target_q = rew + self._gamma * q_max * not_done
 
         self.optim.zero_grad()
+
+        model = getattr(self, "model")
+        model.train()
+        logits, h = model(batch_feature, state=None)
+        # logits: [batch_size, num_actions]
+        # logits.gather(1, batch_action): [batch_size, 1]
+        # logits.gather(1, batch_action).view(-1): [batch_size]
+        loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
         loss.backward()
+        model_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         self.optim.step()
 
         self.train_step += 1
@@ -232,12 +213,8 @@ class Agent(BaseAgent):
         if self.train_step % self.target_update_freq == 0:
             self.update_target_q()
 
-        q_values = (pred_dist * support).sum(dim=1)
-        target_q_values = (target_pmfs * support).sum(dim=1)
-
         value_loss = loss.detach().item()
-        q_value = q_values.mean().detach().item()
-        target_q_value = target_q_values.mean().detach().item()
+        q_value = target_q.mean().detach().item()
         reward = rew.mean().detach().item()
 
         # Periodically report monitoring
@@ -248,8 +225,8 @@ class Agent(BaseAgent):
                 "value_loss": value_loss,
                 "q_value": q_value,
                 "reward": reward,
-                "diy_1": target_q_value,
-                "diy_2": 0,
+                "diy_1": model_grad_norm,
+                "diy_2": self.lr,
                 "diy_3": 0,
                 "diy_4": 0,
                 "diy_5": 0,
