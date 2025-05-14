@@ -16,7 +16,7 @@ torch.set_num_interop_threads(1)
 
 import os
 import time
-from diy.model.model import Model, NoisyDuelingDistributionalNetwork
+from diy.model.model import Model, DuelingNetwork
 from diy.feature.definition import ActData
 import numpy as np
 from copy import deepcopy
@@ -48,7 +48,12 @@ class Agent(BaseAgent):
         self.decay_rate = Config.LR_DECAY
         
         self.device = device
-        self.model = Model(
+        # self.model = Model(
+        #     state_shape=self.obs_shape,
+        #     action_shape=self.act_shape,
+        #     softmax=False,
+        # )
+        self.model = DuelingNetwork(
             state_shape=self.obs_shape,
             action_shape=self.act_shape,
             softmax=False,
@@ -66,7 +71,7 @@ class Agent(BaseAgent):
 
     def linear_schedule(self, step):
         # 学习率线性衰减
-        self.lr = max(1e-5, self.lr - self.decay_rate)#6e4*decay_rate=1e-4
+        self.lr = max(1e-5, self.lr - self.decay_rate)#5e4*decay_rate=1e-4
         for param_group in self.optim.param_groups:
             param_group["lr"] = self.lr
         # print(f"step: {step}, lr: {self.lr}")
@@ -183,28 +188,50 @@ class Agent(BaseAgent):
             self.__convert_to_tensor(_batch_feature_map).view(batch, *self.obs_split[1]),
         ]
 
-        model = getattr(self, "target_model")
-        model.eval()
-        #todo Double Q-learning
+        q_network = getattr(self, "model")
+        target_network = getattr(self, "target_model")
+        target_network.eval()
         with torch.no_grad():
-            q, h = model(_batch_feature, state=None)
-            q = q.masked_fill(~_batch_obs_legal, float(torch.min(q)))
-            q_max = q.max(dim=1).values.detach()
+            next_q_values, _ = target_network(_batch_feature, state=None)
+            next_q_values = next_q_values.masked_fill(~_batch_obs_legal, float(torch.min(next_q_values)))
+            
+            # Double Q-Learning
+            next_q_online, _ = q_network(_batch_feature, state=None)    # [B, num_actions]
+            next_q_online = next_q_online.masked_fill(~_batch_obs_legal, float(torch.min(next_q_online)))
+            best_actions = torch.argmax(next_q_online, dim=1)   # [B]
+            q_max = next_q_values.gather(1, best_actions.unsqueeze(1)).squeeze(1).detach()
 
+        q_network.train()
         target_q = rew + self._gamma * q_max * not_done
-
-        self.optim.zero_grad()
-
-        model = getattr(self, "model")
-        model.train()
-        logits, h = model(batch_feature, state=None)
-        # logits: [batch_size, num_actions]
-        # logits.gather(1, batch_action): [batch_size, 1]
-        # logits.gather(1, batch_action).view(-1): [batch_size]
+        logits, h = q_network(batch_feature, state=None)
         loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
         loss.backward()
-        model_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        model_grad_norm = torch.nn.utils.clip_grad_norm_(q_network.parameters(), 1.0)
         self.optim.step()
+
+
+        # model = getattr(self, "target_model")
+        # model.eval()
+
+        # with torch.no_grad():
+        #     q, h = model(_batch_feature, state=None)
+        #     q = q.masked_fill(~_batch_obs_legal, float(torch.min(q)))
+        #     q_max = q.max(dim=1).values.detach()
+
+        # target_q = rew + self._gamma * q_max * not_done
+
+        # self.optim.zero_grad()
+
+        # model = getattr(self, "model")
+        # model.train()
+        # logits, h = model(batch_feature, state=None)
+        # # logits: [batch_size, num_actions]
+        # # logits.gather(1, batch_action): [batch_size, 1]
+        # # logits.gather(1, batch_action).view(-1): [batch_size]
+        # loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
+        # loss.backward()
+        # model_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        # self.optim.step()
 
         self.train_step += 1
 
