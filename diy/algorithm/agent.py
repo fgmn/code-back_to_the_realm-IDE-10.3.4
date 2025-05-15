@@ -16,7 +16,7 @@ torch.set_num_interop_threads(1)
 
 import os
 import time
-from diy.model.model import Model, DuelingNetwork
+from diy.model.model import Model, DuelingNetwork, NoisyDuelingNetwork, NoisyLinear
 from diy.feature.definition import ActData
 import numpy as np
 from copy import deepcopy
@@ -53,7 +53,12 @@ class Agent(BaseAgent):
         #     action_shape=self.act_shape,
         #     softmax=False,
         # )
-        self.model = DuelingNetwork(
+        # self.model = DuelingNetwork(
+        #     state_shape=self.obs_shape,
+        #     action_shape=self.act_shape,
+        #     softmax=False,
+        # )
+        self.model = NoisyDuelingNetwork(
             state_shape=self.obs_shape,
             action_shape=self.act_shape,
             softmax=False,
@@ -112,27 +117,31 @@ class Agent(BaseAgent):
         # )
         legal_act = legal_act.bool().to(self.device)
         model = self.model
-        model.eval()
+        if exploit_flag:
+            model.eval()
+        else:
+            model.reset_noise()
+            model.train()
         # Exploration factor,
         # we want epsilon to decrease as the number of prediction steps increases, until it reaches 0.1
         # 探索因子, 我们希望epsilon随着预测步数越来越小，直到0.1为止
-        self.epsilon = max(0.1, self.epsilon - self.predict_count / self.egp)
+        # self.epsilon = max(0.1, self.epsilon - self.predict_count / self.egp)
 
         with torch.no_grad():
-            # epsilon greedy
-            if not exploit_flag and np.random.rand(1) < self.epsilon:
-                random_action = np.random.rand(batch, self.act_shape)
-                random_action = torch.tensor(random_action, dtype=torch.float32).to(self.device)
-                random_action = random_action.masked_fill(~legal_act, 0)
-                act = random_action.argmax(dim=1).cpu().view(-1, 1).tolist()
-            else:
-                feature = [
-                    self.__convert_to_tensor(feature_vec),
-                    self.__convert_to_tensor(feature_map).view(batch, *self.obs_split[1]),
-                ]
-                logits, _ = model(feature, state=None)
-                logits = logits.masked_fill(~legal_act, float(torch.min(logits)))
-                act = logits.argmax(dim=1).cpu().view(-1, 1).tolist()
+            # # epsilon greedy
+            # if not exploit_flag and np.random.rand(1) < self.epsilon:
+            #     random_action = np.random.rand(batch, self.act_shape)
+            #     random_action = torch.tensor(random_action, dtype=torch.float32).to(self.device)
+            #     random_action = random_action.masked_fill(~legal_act, 0)
+            #     act = random_action.argmax(dim=1).cpu().view(-1, 1).tolist()
+            # else:
+            feature = [
+                self.__convert_to_tensor(feature_vec),
+                self.__convert_to_tensor(feature_map).view(batch, *self.obs_split[1]),
+            ]
+            logits, _ = model(feature, state=None)
+            logits = logits.masked_fill(~legal_act, float(torch.min(logits)))
+            act = logits.argmax(dim=1).cpu().view(-1, 1).tolist()
 
         format_action = [[instance[0] % self.direction_space, instance[0] // self.direction_space] for instance in act]
         self.predict_count += 1
@@ -190,7 +199,14 @@ class Agent(BaseAgent):
 
         q_network = getattr(self, "model")
         target_network = getattr(self, "target_model")
-        target_network.eval()
+
+        q_network.reset_noise()
+        target_network.reset_noise()
+
+        q_network.train()
+        target_network.train()
+        # target_network.eval()
+
         with torch.no_grad():
             next_q_values, _ = target_network(_batch_feature, state=None)
             next_q_values = next_q_values.masked_fill(~_batch_obs_legal, float(torch.min(next_q_values)))
@@ -201,7 +217,6 @@ class Agent(BaseAgent):
             best_actions = torch.argmax(next_q_online, dim=1)   # [B]
             q_max = next_q_values.gather(1, best_actions.unsqueeze(1)).squeeze(1).detach()
 
-        q_network.train()
         target_q = rew + self._gamma * q_max * not_done
         logits, h = q_network(batch_feature, state=None)
         loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
@@ -248,13 +263,14 @@ class Agent(BaseAgent):
         # 按照间隔上报监控
         now = time.time()
         if now - self.last_report_monitor_time >= 60:
+            noisy = next(m for m in q_network.value_head if isinstance(m, NoisyLinear))
             monitor_data = {
                 "value_loss": value_loss,
                 "q_value": q_value,
                 "reward": reward,
                 "diy_1": model_grad_norm,
                 "diy_2": self.lr,
-                "diy_3": 0,
+                "diy_3": noisy.weight_sigma.mean().item(),
                 "diy_4": 0,
                 "diy_5": 0,
             }
