@@ -56,7 +56,7 @@ def workflow(envs, agents, logger=None, monitor=None):
         data_length = 0
         for g_data in run_episodes(episode_num_every_epoch, env, agent, g_data_truncat, usr_conf, logger):
             data_length += len(g_data)
-            total_rew = sum([i.rew for i in g_data])
+            total_rew = sum([i.ext_rew+i.int_rew for i in g_data])
             epoch_total_rew += total_rew
             agent.learn(g_data)
             g_data.clear()
@@ -123,6 +123,9 @@ def run_episodes(n_episode, env, agent, g_data_truncat, usr_conf, logger):
             # 特征处理
             _obs_data = observation_process(_obs, _env_info)
 
+            # 评估内在奖励
+            int_reward = agent.get_int_reward(list_obs_data=[_obs_data])[0]
+
             # Disaster recovery
             # 容灾
             if truncated and frame_no is None:
@@ -179,7 +182,8 @@ def run_episodes(n_episode, env, agent, g_data_truncat, usr_conf, logger):
                 obs_legal=obs_data.legal_act,
                 _obs_legal=_obs_data.legal_act,
                 act=act,
-                rew=reward,
+                ext_rew=reward,
+                int_rew=int_reward,
                 done=done,
                 ret=reward,
             )

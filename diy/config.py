@@ -19,7 +19,8 @@ class Config:
     # learner上reverb样本的输入维度, 注意不同的算法维度不一样, 比如示例代码中dqn的维度是21624, target_dqn的维度是21624
     # **注意**，此项必须正确配置，应该与definition.py中的NumpyData2SampleData函数数据对齐，否则可能报样本维度错误
     #legal_act从2维改为16维
-    SAMPLE_DIM = 21624+28
+    #加一维内在奖励
+    SAMPLE_DIM = 21624+28+1
 
     # Size of observation
     # observation的维度，注意在我们的示例代码中原特征维度是10808，这里是经过CNN处理之后的维度与原始向量特征拼接后的维度
@@ -68,3 +69,9 @@ class Config:
     LSTM_CELL_SHAPE = 0
     OBSERVATION_SHAPE = 4500
     LEGAL_ACTION_SHAPE = 2
+
+    # RND参数
+    RND_UPDATE_PROP = 0.25
+    INT_REW_COEF = 0.05
+    EXT_REW_COEF = 1
+    RND_WARMUP_STEPS = 500

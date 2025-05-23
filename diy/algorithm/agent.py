@@ -10,13 +10,15 @@
 """
 
 import torch
+import torch.nn.functional as F
 
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 
 import os
 import time
-from diy.model.model import Model, DuelingNetwork
+from diy.model.model import Model, DuelingNetwork, RNDModel, \
+                            RunningMeanStd, update_mean_var_count_from_moments
 from diy.feature.definition import ActData
 import numpy as np
 from copy import deepcopy
@@ -46,7 +48,11 @@ class Agent(BaseAgent):
         self._gamma = Config.GAMMA
         self.lr = Config.START_LR
         self.decay_rate = Config.LR_DECAY
-        
+        self.rnd_update_prop = Config.RND_UPDATE_PROP
+        self.int_rew_coef = Config.INT_REW_COEF
+        self.ext_rew_coef = Config.EXT_REW_COEF
+        self.rnd_warmup_steps = Config.RND_WARMUP_STEPS
+
         self.device = device
         # self.model = Model(
         #     state_shape=self.obs_shape,
@@ -59,8 +65,19 @@ class Agent(BaseAgent):
             softmax=False,
         )
         self.model.to(self.device)
-        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.rnd_model = RNDModel(
+            state_shape=self.obs_shape,
+        ).to(self.device)
+        
+        combined_parameters = list(self.model.parameters()) + list(self.rnd_model.predictor.parameters())
+        self.optim = torch.optim.Adam(combined_parameters, lr=self.lr)
         self.target_model = deepcopy(self.model)
+
+        # 在线白化模块
+        self.reward_rms = RunningMeanStd()
+        self.vec_rms = RunningMeanStd(shape=(self.obs_split[0],))
+        self.map_rms = RunningMeanStd(shape=self.obs_split[1])
+
         self.train_step = 0
         self.predict_count = 0
         self.last_report_monitor_time = 0
@@ -137,6 +154,33 @@ class Agent(BaseAgent):
         format_action = [[instance[0] % self.direction_space, instance[0] // self.direction_space] for instance in act]
         self.predict_count += 1
         return [ActData(move_dir=i[0], use_talent=i[1]) for i in format_action]
+    
+    def get_int_reward(self, list_obs_data):
+        batch = len(list_obs_data)
+        feature_vec = [obs_data.feature[: self.obs_split[0]] for obs_data in list_obs_data]
+        feature_map = [obs_data.feature[self.obs_split[0] :] for obs_data in list_obs_data]
+
+        feature_vec = self.__convert_to_tensor(feature_vec)
+        feature_map = self.__convert_to_tensor(feature_map).view(batch, *self.obs_split[1])
+        # 白化观测
+        feature_vec = (
+            (
+            feature_vec - torch.from_numpy(self.vec_rms.mean).to(self.device)
+            ) / torch.sqrt(torch.from_numpy(self.vec_rms.var).to(self.device))
+        ).clamp(-5, 5).float()
+        feature_map = (
+            (feature_map - torch.from_numpy(self.map_rms.mean).to(self.device))
+            / torch.sqrt(torch.from_numpy(self.map_rms.var).to(self.device))
+        ).clamp(-5, 5).float()
+
+        feature = [feature_vec, feature_map]
+        
+        predict_feature, target_feature = self.rnd_model(feature)
+        curiosity_rewards = ((predict_feature - target_feature).pow(2).sum(dim=1) / 2).detach()
+        # 从buffer中取出再白化
+        # curiosity_rewards /= torch.sqrt(torch.tensor(self.reward_rms.var, device=self.device))
+        # 必须打包成list返回
+        return curiosity_rewards.cpu().numpy().tolist()
 
     @predict_wrapper
     def predict(self, list_obs_data):
@@ -174,10 +218,12 @@ class Agent(BaseAgent):
         # )
         _batch_obs_legal = _batch_obs_legal.bool().to(self.device)
 
-        rew = torch.tensor(np.array([frame.rew for frame in t_data]), device=self.device)
+        int_rew = torch.tensor(np.array([frame.int_rew for frame in t_data]), device=self.device)
+        ext_rew = torch.tensor(np.array([frame.ext_rew for frame in t_data]), device=self.device)
         _batch_feature_vec = [frame._obs[: self.obs_split[0]] for frame in t_data]
         _batch_feature_map = [frame._obs[self.obs_split[0] :] for frame in t_data]
         not_done = torch.tensor(np.array([0 if frame.done == 1 else 1 for frame in t_data]), device=self.device)
+
 
         batch_feature = [
             self.__convert_to_tensor(batch_feature_vec),
@@ -188,6 +234,55 @@ class Agent(BaseAgent):
             self.__convert_to_tensor(_batch_feature_map).view(batch, *self.obs_split[1]),
         ]
 
+        # print("batch_feature_vec shape:", np.array(batch_feature_vec).shape)
+        # print("batch_feature_map shape:", np.array(batch_feature_map).shape)
+        # print("batch_feature[0] shape:", batch_feature[0].shape)
+        # print("batch_feature[1] shape:", batch_feature[1].shape)
+        # batch_feature_vec shape: (2, 404)
+        # batch_feature_map shape: (2, 10404)
+        # batch_feature[0] shape: torch.Size([2, 404])
+        # batch_feature[1] shape: torch.Size([2, 4, 51, 51])
+
+
+        # 更新在线白化模块
+        self.reward_rms.update(int_rew.cpu().numpy())           # [B]
+        self.vec_rms.update(_batch_feature[0].cpu().numpy())    # [B, 404]
+        self.map_rms.update(_batch_feature[1].cpu().numpy())    # [B, 4, 51, 51]
+        
+        # 预热rms
+        if self.rnd_warmup_steps > 0:
+            self.rnd_warmup_steps -= 1
+            return
+
+        # 白化内在奖励(只除以方差，保证非负)
+        int_rew /= torch.sqrt(torch.tensor(self.reward_rms.var, device=self.device))
+        
+        rew = int_rew * self.int_rew_coef + ext_rew * self.ext_rew_coef
+        
+        # 白化观测
+        rnd_batch_feature_vec = (
+            (_batch_feature[0] - torch.from_numpy(self.vec_rms.mean).to(self.device))
+            / torch.sqrt(torch.from_numpy(self.vec_rms.var).to(self.device))
+        ).clamp(-5, 5).float()
+        rnd_batch_feature_map = (
+            (_batch_feature[1] - torch.from_numpy(self.map_rms.mean).to(self.device))
+            / torch.sqrt(torch.from_numpy(self.map_rms.var).to(self.device))
+        ).clamp(-5, 5).float()
+        rnd_batch_feature = [rnd_batch_feature_vec, rnd_batch_feature_map]
+
+        predict_feature, target_feature = self.rnd_model(rnd_batch_feature) # [B, D]
+        # 计算RND前向损失
+        forward_loss = F.mse_loss(
+            predict_feature, target_feature.detach(), reduction="none"
+        ).mean(-1)  # D维度上求均值
+        # 给RND predictor的前向损失加上随机mask，防止过快收敛 --> 内在奖励消失
+        mask = torch.rand(len(forward_loss), device=self.device)
+        mask = (mask < self.rnd_update_prop).type(torch.float32).to(self.device)
+        rnd_loss = (forward_loss * mask).sum() / torch.max(
+            mask.sum(), torch.tensor(1.0, device=self.device)
+        )
+
+        
         q_network = getattr(self, "model")
         target_network = getattr(self, "target_model")
         target_network.eval()
@@ -205,6 +300,7 @@ class Agent(BaseAgent):
         target_q = rew + self._gamma * q_max * not_done
         logits, h = q_network(batch_feature, state=None)
         loss = torch.square(target_q - logits.gather(1, batch_action).view(-1)).mean()
+        loss += rnd_loss
         loss.backward()
         model_grad_norm = torch.nn.utils.clip_grad_norm_(q_network.parameters(), 1.0)
         self.optim.step()
@@ -243,6 +339,8 @@ class Agent(BaseAgent):
         value_loss = loss.detach().item()
         q_value = target_q.mean().detach().item()
         reward = rew.mean().detach().item()
+        ext_rew = ext_rew.mean().detach().item()
+        int_rew = int_rew.mean().detach().item()
 
         # Periodically report monitoring
         # 按照间隔上报监控
@@ -254,8 +352,8 @@ class Agent(BaseAgent):
                 "reward": reward,
                 "diy_1": model_grad_norm,
                 "diy_2": self.lr,
-                "diy_3": 0,
-                "diy_4": 0,
+                "diy_3": ext_rew,
+                "diy_4": int_rew,
                 "diy_5": 0,
             }
             if self.monitor:
@@ -277,6 +375,33 @@ class Agent(BaseAgent):
 
         self.logger.info(f"save model {model_file_path} successfully")
 
+        rnd_model_file_path = f"{path}/rnd_model.ckpt-{str(id)}.pkl"
+        rnd_model_state_dict_cpu = {k: v.clone().cpu() for k, v in self.rnd_model.state_dict().items()}
+        torch.save(rnd_model_state_dict_cpu, rnd_model_file_path)
+        self.logger.info(f"save rnd model {rnd_model_file_path} successfully")
+
+        # 保存三个 RunningMeanStd 的状态
+        rms_states = {
+            "reward": {
+                "mean": self.reward_rms.mean,
+                "var": self.reward_rms.var,
+                "count": self.reward_rms.count,
+            },
+            "vec": {
+                "mean": self.vec_rms.mean,
+                "var": self.vec_rms.var,
+                "count": self.vec_rms.count,
+            },
+            "map": {
+                "mean": self.map_rms.mean,
+                "var": self.map_rms.var,
+                "count": self.map_rms.count,
+            },
+        }
+        rms_file_path = f"{path}/rms.ckpt-{str(id)}.pkl"
+        torch.save(rms_states, rms_file_path)
+        self.logger.info(f"save rms states {rms_file_path} successfully")
+
     @load_model_wrapper
     def load_model(self, path=None, id="1"):
         # When loading the model, you can load multiple files,
@@ -288,6 +413,30 @@ class Agent(BaseAgent):
         )
 
         self.logger.info(f"load model {model_file_path} successfully")
+
+        rnd_model_file_path = f"{path}/rnd_model.ckpt-{str(id)}.pkl"
+        self.rnd_model.load_state_dict(
+            torch.load(rnd_model_file_path, map_location=self.device),
+        )
+        self.logger.info(f"load rnd model {rnd_model_file_path} successfully")
+
+        # 加载三个 RunningMeanStd 的状态
+        rms_file_path = f"{path}/rms.ckpt-{str(id)}.pkl"
+        rms_states = torch.load(rms_file_path, map_location="cpu")
+        # 直接赋值 numpy 数组
+        self.reward_rms.mean = rms_states["reward"]["mean"]
+        self.reward_rms.var = rms_states["reward"]["var"]
+        self.reward_rms.count = rms_states["reward"]["count"]
+
+        self.vec_rms.mean = rms_states["vec"]["mean"]
+        self.vec_rms.var = rms_states["vec"]["var"]
+        self.vec_rms.count = rms_states["vec"]["count"]
+
+        self.map_rms.mean = rms_states["map"]["mean"]
+        self.map_rms.var = rms_states["map"]["var"]
+        self.map_rms.count = rms_states["map"]["count"]
+
+        self.logger.info(f"load rms states {rms_file_path} successfully")
 
     def update_target_q(self):
         self.target_model.load_state_dict(self.model.state_dict())
